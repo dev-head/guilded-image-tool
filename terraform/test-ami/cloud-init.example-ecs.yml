@@ -1,0 +1,199 @@
+write_files:
+  - path: /etc/cron.d/default-cron
+    permissions: '0700'
+    content: |
+      SHELL=/bin/sh
+      PATH=/sbin:/bin
+      @daily root docker rm $(docker ps -a  | grep Exited | awk '{print $1}')  > /dev/null 2>&1
+      @daily root docker rmi $(docker images | grep \<none\> | awk '{ print $3 }') > /dev/null 2>&1
+
+  - path: /etc/docker/daemon.json.prod
+    permissions: '0700'
+    content: |
+      {
+        "max-concurrent-downloads": 3,
+        "storage-driver": "overlay2",
+        "log-level": "info",
+        "debug": false,
+        "log-driver": "json-file",
+        "experimental": false,
+        "data-root": "/ecs/docker-data",
+        "log-opts": {
+            "max-size": "10m",
+            "max-file": "2"
+        }
+      }
+
+  - path: /etc/cloudwatch_log_files.json
+    permissions: '0600'
+    content: |
+      [
+        {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "syslog",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/auth.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "auth.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/cloud-init-output.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "cloud-init-output.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        }
+      ]
+
+  - path: "/etc/ecs/ecs.config"
+    permissions: "0644"
+    owner: "root"
+    content: |
+      ECS_CLUSTER=${Name}
+      ECS_RESERVED_PORTS=[22, 2375, 2376, 51678, 51679]
+      ECS_LOGLEVEL=info
+      ECS_LOGFILE=/log/ecs-agent.log
+      ECS_DATADIR=/data/
+      ECS_UPDATES_ENABLED=true
+      ECS_UPDATE_DOWNLOAD_DIR=/tmp
+      ECS_DISABLE_METRICS=false
+      ECS_RESERVED_MEMORY=0
+      ECS_AVAILABLE_LOGGING_DRIVERS=["json-file","awslogs"]
+      ECS_DISABLE_PRIVILEGED=false
+      ECS_SELINUX_CAPABLE=false
+      ECS_APPARMOR_CAPABLE=false
+      ECS_ENGINE_TASK_CLEANUP_WAIT_DURATION=1h
+      ECS_CONTAINER_STOP_TIMEOUT=30s
+      ECS_ENABLE_TASK_IAM_ROLE=true
+      ECS_ENABLE_TASK_IAM_ROLE_NETWORK_HOST=false
+      ECS_DISABLE_IMAGE_CLEANUP=false
+      ECS_IMAGE_CLEANUP_INTERVAL=1h
+      ECS_IMAGE_MINIMUM_CLEANUP_AGE=1h
+      ECS_IMAGE_PULL_BEHAVIOR=once
+      ECS_IMAGE_PULL_INACTIVITY_TIMEOUT=3m
+      ECS_NUM_IMAGES_DELETE_PER_CYCLE=10
+      ECS_INSTANCE_ATTRIBUTES={"Project": "${Project}", "Environment": "${Environment}", "Platform": "${Platform}", "name": "${Name}"}
+      ECS_ENABLE_TASK_ENI=false
+      ECS_ENABLE_CONTAINER_METADATA=true
+      ECS_HOST_DATA_DIR=/var/lib/ecs
+      ECS_ENABLE_TASK_CPU_MEM_LIMIT=true
+      ECS_ENABLE_UNTRACKED_IMAGE_CLEANUP=true
+      ECS_EXCLUDE_UNTRACKED_IMAGE={"kitematic/hello-world-nginx": "latest", "ubuntu": "16.04"}
+
+  #
+  # Installs
+  - path: /sbin/configure_cloudwatch_agent
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop | true
+      sudo cp /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json /tmp/cloudwatch-dist.json
+
+      jq --slurpfile conf /etc/cloudwatch_log_files.json '.logs.logs_collected.files.collect_list = $conf[0]' /tmp/cloudwatch-dist.json > /tmp/cloudwatch-logs-added.json
+      jq ".metrics.namespace = \"${Platform}/${Environment}-${Project}\" | .logs.log_stream_name = \"${Platform}-${Environment}-${Project}\" | .logs.logs_collected.files.collect_list[].log_group_name = \"${Platform}-${Environment}-${Project}\"" /tmp/cloudwatch-logs-added.json > /tmp/cloudwatch-namespace-added.json
+      sudo cp /tmp/cloudwatch-namespace-added.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json
+
+      # Start the agent up with new config
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json -s
+
+  - path: /sbin/install_ecs
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      /usr/bin/docker stop ecs-agent || true
+      /usr/bin/docker rm ecs-agent || true
+      /usr/bin/docker rmi amazon/amazon-ecs-agent:latest || true
+      /usr/bin/docker pull amazon/amazon-ecs-agent:latest
+      mkdir -p /var/log/ecs /var/lib/ecs/data
+
+      if [ $? != 0 ]; then
+          echo "$[FAILED]::[pull amazon/amazon-ecs-agent:latest]::[wait 10s]"
+          sleep 10
+          /usr/bin/docker pull amazon/amazon-ecs-agent:latest
+      fi
+
+      if [ $? != 0 ]; then
+          echo "$[FAILED]::[pull amazon/amazon-ecs-agent:latest]::[wait 20s]"
+          sleep 20
+          /usr/bin/docker pull amazon/amazon-ecs-agent:latest
+      fi
+
+      if [ $? != 0 ]; then exit 1; fi
+
+      /usr/bin/docker run --name ecs-agent \
+        --detach=true \
+        --net=host \
+        --privileged \
+        --restart=on-failure:10 \
+        --volume=/var/run/docker.sock:/var/run/docker.sock \
+        --volume=/var/log/ecs/:/log \
+        --volume=/var/lib/ecs/data:/data \
+        --volume=/sys/fs/cgroup:/sys/fs/cgroup:ro \
+        --volume=/etc/ecs:/etc/ecs \
+        --env-file=/etc/ecs/ecs.config \
+        amazon/amazon-ecs-agent:latest
+
+  - path: /sbin/install_volumes
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      file -s /dev/xvdf
+      mkfs -t ext4 /dev/xvdf
+      mkdir -p /ecs
+      mount /dev/xvdf /ecs
+      cp /etc/fstab /etc/fstab.orig
+      echo "/dev/xvdf    /ecs   ext4    defaults,nofail,nobootwait        0       2" | tee -a /etc/fstab
+      mount -a
+
+  - path: /sbin/install_docker
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      apt-get -y remove docker docker-engine docker.io containerd docker-ce
+      apt-get autoclean && apt-get autoremove -y && apt-get clean
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+      apt-key fingerprint 0EBFCD88
+      add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+      apt-get update
+      DEBIAN_FRONTEND=noninteractive apt-get install -o Dpkg::Options::="--force-confold" -y --force-yes --no-install-recommends --no-install-suggests docker-ce
+      systemctl enable docker
+      service docker stop
+      cp /etc/docker/daemon.json /etc/docker/daemon.json.dist
+      cp /etc/docker/daemon.json.prod /etc/docker/daemon.json
+      service docker start
+
+packages:
+  - apt-transport-https
+  - software-properties-common
+
+users:
+  - default
+  - name: ops-user
+    gecos: Ops User
+    groups: sudo
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    ssh-authorized-keys:
+      - "ssh-rsa ahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahaha"
+  - name: deploy
+    gecos: Deploy User
+    groups: www-data, admin
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    lock-passwd: false
+    passwd: $ahahahahaahahahahaahahahahaahahahahaahahahaha.
+
+runcmd:
+  - /sbin/configure_cloudwatch_agent
+  - /sbin/install_volumes
+  - /sbin/install_docker
+  - mkdir -p /ecs/var/logs
+  - chmod -R 777 /ecs/var/logs
+  - /sbin/install_ecs

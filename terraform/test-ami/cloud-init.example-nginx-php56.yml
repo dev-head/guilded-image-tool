@@ -1,0 +1,286 @@
+write_files:
+
+  - path: /etc/cloudwatch_log_files.json
+    permissions: '0600'
+    content: |
+      [
+        {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "syslog",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/auth.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "auth.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/cloud-init-output.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "cloud-init-output.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/php5.6-fpm.log*",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "php5.6-fpm.log",
+            "timestamp_format": "%d-%b-%Y %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/aws/codedeploy-agent/codedeploy-agent.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "codedeploy-agent.log",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/mnt/log/deploy/s3.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "codedeploy-s3",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/www/example/app/logs/*.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "app-logs-merged",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/nginx/api_access.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "api.access.log",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/nginx/api_error.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "api.error.log",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        }
+      ]
+
+
+  # Override defaults for http php.
+  - path: /etc/php/5.6/fpm/conf.d/zz-app.php.ini
+    permissions: '0700'
+    content: |
+      date.timezone           = UTC
+      max_execution_time      = 180s
+      max_input_time          = 60s
+      memory_limit            = 1G
+      post_max_size           = 18M
+      upload_max_filesize     = 16M
+
+  # Override defaults for cli php.
+  - path: /etc/php/5.6/cli/conf.d/zz-app.php.ini
+    permissions: '0700'
+    content: |
+      date.timezone           = UTC
+
+  # Configure default nginx vhost file
+  - path: /etc/nginx/sites-available/default
+    permissions: '0700'
+    content: |
+
+      server {
+          listen 80;
+          listen 81;
+          server_name example.com;
+          root /var/www/example/www;
+
+          location / {
+            index app.php;
+            try_files $uri @rewrite;
+          }
+
+          location /health {
+            try_files $uri /app.php$is_args$args;
+          }
+
+          location @rewrite {
+            rewrite ^(.*)$ /app.php/$1 last;
+          }
+
+          location ~ "^(.+\.php)($|/)" {
+            fastcgi_pass 127.0.0.1:9005;
+            fastcgi_split_path_info ^(.+\.php)(/.*)$;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $realpath_root$fastcgi_script_name;
+            fastcgi_param DOCUMENT_ROOT $realpath_root;
+            fastcgi_param PATH_INFO $fastcgi_path_info;
+            fastcgi_param  HTTPS on;
+            fastcgi_param SYM_ENV prod;
+            fastcgi_param APP_ENV prod;
+            internal;
+          }
+
+          location ~* ^.+.(jpg|jpeg|gif|css|png|js|ico|xml|swf)$ {
+            access_log        off;
+            expires           30d;
+          }
+
+          proxy_set_header X-Real-IP  $remote_addr;
+          proxy_set_header X-Forwarded-For $remote_addr;
+          proxy_set_header  X-Server-Address  $server_addr;
+          proxy_set_header Host $host;
+
+          # [prevent script hyjacking](http://www.webhostingtalk.com/showthread.php?p=6807475#post6807475)
+          if ( $fastcgi_script_name ~ \..*\/.*php ) {
+            return 403;
+          }
+
+          # Disable viewing . files
+          location ~ /(\.ht|\.git|\.docker|Dockerfile) {
+            deny  all;
+          }
+
+          # block direct access to specific dirs
+          location ~ /(build) {
+            deny  all;
+            return 404;
+          }
+
+          # Deny based upon abuse from client requests.
+          location ~ /(wordpress|wp-log|phpmyadmin|wp-login.php|joomla|wp-admin) {
+            deny  all;
+            return 404;
+          }
+
+        error_log /var/log/nginx/api_error.log;
+        access_log /var/log/nginx/api_access.log;
+      }
+
+  - path: /etc/logrotate.d/app.conf
+    permissions: '0644'
+    owner: 'root'
+    content: |
+      /mnt/logs/*.log
+      {
+        weekly
+        missingok
+        rotate 26
+        compress
+        delaycompress
+        notifempty
+        su www-data www-data
+        create 640 www-data www-data
+
+  - path: /etc/logrotate.d/php_log.conf
+    permissions: '0644'
+    owner: 'root'
+    content: |
+      /var/log/php5.6-fpm.log
+      {
+        weekly
+        missingok
+        rotate 12
+        compress
+        delaycompress
+        notifempty
+        create 640 www-data adm
+        sharedscripts
+        postrotate
+          /usr/lib/php5/php5.6-fpm-reopenlogs
+        endscript
+      }
+
+  - path: /sbin/configure_cloudwatch_agent
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop | true
+      sudo cp /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json /tmp/cloudwatch-dist.json
+
+      jq --slurpfile conf /etc/cloudwatch_log_files.json '.logs.logs_collected.files.collect_list = $conf[0]' /tmp/cloudwatch-dist.json > /tmp/cloudwatch-logs-added.json
+      jq ".metrics.namespace = \"${Platform}/${Environment}-${Project}\" | .logs.log_stream_name = \"${Platform}-${Environment}-${Project}\" | .logs.logs_collected.files.collect_list[].log_group_name = \"${Platform}-${Environment}-${Project}\"" /tmp/cloudwatch-logs-added.json > /tmp/cloudwatch-namespace-added.json
+      sudo cp /tmp/cloudwatch-namespace-added.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json
+
+      # Start the agent up with new config
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json -s
+
+  - path: /sbin/install_volumes
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      mkdir /mnt
+      cp /etc/fstab /etc/fstab.orig
+
+      # identify if pre-nitro based ebs mount
+      if [[ $(lsblk | grep xvdf) ]] && [[ $(file -s /dev/xvdf| grep data) ]]; then
+          echo "[install_volumes]::[xvdf]::[volume found]"
+          if [[ ! $(file -s /dev/xvdf| grep filesystem) ]]; then
+              echo "[install_volumes]::[xvdf]::[creating new file system]"
+              mkfs -t ext4 /dev/xvdf
+          fi
+          mount /dev/xvdf /mnt
+          echo "/dev/xvdf       /mnt   ext4    defaults,nofail        0       2" | tee -a /etc/fstab
+      fi
+
+      # Nitro based mount
+      if [[ $(lsblk | grep nvme1n1) ]] && [[ $(file -s /dev/nvme1n1| grep data) ]]; then
+         echo "[install_volumes]::[nvme1n1]::[volume found]"
+          if [[ ! $(file -s /dev/nvme1n1| grep filesystem) ]]; then
+              echo "[install_volumes]::[nvme1n1]::[creating new file system]"
+              mkfs -t ext4 /dev/nvme1n1
+          fi
+          mount /dev/nvme1n1 /mnt
+          echo "/dev/nvme1n1       /mnt   ext4    defaults,nofail        0       2" | tee -a /etc/fstab
+      fi
+
+      mount -a
+      mkdir /mnt/logs
+
+  - path: /sbin/configure_nginx
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      service restart nginx
+      service restart php5.6-fpm
+
+      find /var/www -type d -exec chmod 750 {} \;
+      find /var/www -type f -exec chmod 640 {} \;
+      chown -R www-data:www-data /var/www /srv/
+      chown -R www-data:adm /var/log/nginx
+
+      # Hack for php service alias support
+      # doing this to be backwards compat with existing build.
+      echo "Alias=php5-fpm.service" | sudo tee -a /lib/systemd/system/php5.6-fpm.service
+      sudo systemctl daemon-reload
+      sudo systemctl reenable /lib/systemd/system/php5.6-fpm.service
+
+packages:
+  - nvme-cli
+  
+users:
+  - default
+  - name: ops-user
+    gecos: Ops User
+    groups: sudo
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    ssh-authorized-keys:
+      - "ssh-rsa ahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahaha"
+  - name: deploy
+    gecos: Deploy User
+    groups: www-data, admin
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    lock-passwd: false
+    passwd: $ahahahahaahahahahaahahahahaahahahahaahahahaha.
+
+runcmd:
+  - ln -s /usr/local/bin/composer /usr/bin/composer
+  - ln -s /etc/php/5.6 /etc/php5
+  - /sbin/install_volumes
+  - /sbin/configure_cloudwatch_agent
+  - /sbin/configure_nginx
+  - service codedeploy-agent start

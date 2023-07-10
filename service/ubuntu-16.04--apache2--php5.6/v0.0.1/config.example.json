@@ -1,0 +1,23 @@
+{
+  "platform":               "it",
+  "service_name":           "ubuntu-16.04--apache2--php5.6",
+  "service_version":        "0.0.1",
+  "provision_version":      "0.0.1",
+  "os_flavor":              "ubuntu",
+  "os_version":             "16.04",
+
+  "docker_pull":            "false",
+  "docker_image_in":        "exco/ubuntu:16.04-0.0.1",
+  "docker_image_out":       "exco/ubuntu-16.04--apache2--php5.6-0.0.1",
+
+  "aws_profile":            "example",
+  "aws_vpc_id":             "vpc-55555555",
+  "aws_subnet_id":          "subnet-55555555",
+  "aws_security_group_id":  "sg-55555555",
+  "aws_ecr_host":           "555555555555.dkr.ecr.us-east-1.amazonaws.com",
+
+  "root_ebs_encrypt":       "true",
+  "root_ebs_size":          "20",
+  "root_ebs_type":          "gp2",
+  "source_ami":             "ami-555555555555"
+}

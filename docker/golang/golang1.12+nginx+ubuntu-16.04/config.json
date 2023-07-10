@@ -1,0 +1,12 @@
+{
+  "name":                 "examplecom-golang1.2-nginx",
+  "parent_image":         "examplecom-base_app:ubuntu-16.04",
+  "version":              "ubuntu-16.04",
+  "distro":               "ubuntu",
+  "org":                  "examplecom",
+  "pull":                 "false",
+  "provisioner":          "provision.sh",
+  "source_dir":           "docker/golang/golang1.12+nginx+ubuntu-16.04",
+  "provisioned_version":  "0.0.1",
+  "changes": "LABEL name=\"examplecom-golang1.2-nginx\",LABEL parent_image=\"exco/base_app:ubuntu-16.04\",LABEL distro=\"ubuntu\""
+}

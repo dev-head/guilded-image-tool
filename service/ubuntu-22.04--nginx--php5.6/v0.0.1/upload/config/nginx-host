@@ -1,0 +1,82 @@
+server {
+    listen 80 default_server;
+    server_name _;
+    client_max_body_size 50m;
+    index index.php;
+    root /var/www/public;
+    error_page 404 /error.html;
+    keepalive_timeout 5;
+    charset utf-8;
+
+    location ~ \.php(/|$) {
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarder-For $proxy_add_x_forwarded_for;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-NginX-Proxy true;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_http_version 1.1;
+
+        fastcgi_pass php-upstream;
+        fastcgi_intercept_errors on;
+        fastcgi_split_path_info ^(.+\.php)(/.*)$;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS off;
+    }
+
+    location / {
+        add_header Cache-Control no-cache;
+        try_files $uri @rewriteapp;
+        if_modified_since off;
+        add_header Last-Modified "";
+        add_header Content-Security-Policy "default-src 'self' data: ws: wss: fonts.googleapis.com *.google-analytics.com *.cloudfront.net *.twilio.com *.googleapis.com *.gstatic.com 'unsafe-inline' 'unsafe-eval'";
+        add_header X-Frame-Options "SAMEORIGIN";
+        add_header X-Content-Type-Options "nosniff";
+        add_header Strict-Transport-Security "max-age=31536000; includeSubdomains";
+    }
+
+    location @rewriteapp {
+        rewrite ^(.*)$ /index.php/$1 last;
+    }
+
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    location ~ ^/(js|css|images) {
+        gzip on;
+        gzip_types *;
+        expires 1d;
+        add_header Cache-Control public;
+        add_header ETag "";
+        break;
+    }
+
+    # Disable viewing . files
+    location ~ /(\.ht|\.git|\.docker|Dockerfile) {
+        deny  all;
+    }
+
+    # block direct access to specific dirs
+    location ~ /(build|.infra|infra|bin) {
+        deny  all;
+        return 404;
+    }
+
+    # Deny based upon abuse from client requests.
+    location ~ /(wordpress|wp-log|phpmyadmin|wp-login.php|joomla|wp-admin) {
+        deny  all;
+        return 404;
+    }
+
+    location ~* ^.+.(jpg|jpeg|gif|css|png|js|ico|xml|swf)$ {
+      access_log        off;
+      expires           30d;
+    }
+
+    # [prevent script hyjacking](http://www.webhostingtalk.com/showthread.php?p=6807475#post6807475)
+    if ( $fastcgi_script_name ~ \..*\/.*php ) {
+        return 403;
+    }
+
+}

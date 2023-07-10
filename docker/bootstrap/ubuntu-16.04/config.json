@@ -1,0 +1,12 @@
+{
+  "name":                 "examplecom-bootstrap",
+  "parent_image":         "ubuntu:16.04",
+  "version":              "ubuntu-16.04",
+  "distro":               "ubuntu",
+  "org":                  "examplecom",
+  "pull":                 "true",
+  "provisioner":          "provision.sh",
+  "source_dir":           "docker/bootstrap/ubuntu-16.04",
+  "provisioned_version":  "0.0.1",
+  "changes": "WORKDIR /,LABEL name=\"bootstrap\",LABEL parent_image=\"ubuntu:16.04\",LABEL version=\"ubuntu-16.04\",LABEL distro=\"ubuntu\",LABEL org=\"example\",LABEL maintainer=\"dev-head\",LABEL description=\"Boostrapped image.\",LABEL provisioner=\"packer\""
+}

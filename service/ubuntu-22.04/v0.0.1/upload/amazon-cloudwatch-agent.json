@@ -1,0 +1,108 @@
+{
+  "agent": {
+    "metrics_collection_interval": 10,
+    "logfile": "/opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log"
+  },
+  "metrics": {
+    "namespace": "IT-Ubuntu",
+    "metrics_collected": {
+      "cpu": {
+        "measurement": [
+          {"name": "cpu_usage_active", "rename": "CPU Usage Active", "unit": "Percent"},
+          {"name": "cpu_usage_iowait", "rename": "CPU Usage IOWait", "unit": "Percent"}
+        ],
+        "metrics_collection_interval": 60
+      },
+      "disk": {
+        "measurement": [
+          {"name": "used_percent", "rename": "Disk Used %", "unit": "Gigabytes"},
+          {"name": "inodes_free", "rename": "Inodes Free", "unit": "Count"}
+        ],
+        "ignore_file_system_types": [
+          "sysfs", "devtmpfs"
+        ],
+        "metrics_collection_interval": 300
+      },
+      "diskio": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "reads",
+          "writes",
+          "read_bytes",
+          "write_bytes",
+          "io_time"
+        ],
+        "metrics_collection_interval": 300
+      },
+      "swap": {
+        "measurement": [
+          {"name": "swap_used_percent", "rename": "Used Swap %"}
+        ]
+      },
+      "mem": {
+        "measurement": [
+          {"name": "mem_used_percent", "rename": "Used Mem %"}
+        ],
+        "metrics_collection_interval": 60
+      },
+      "net": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          {"name": "bytes_sent", "rename": "Bytes Sent"},
+          {"name": "bytes_recv", "rename": "Bytes Rec"},
+          {"name": "packets_sent", "rename": "Pkts Sent"},
+          {"name": "packets_recv", "rename": "Pkts Rec"},
+          {"name": "drop_in", "rename": "Incoming Pkts Dropped"},
+          {"name": "drop_out", "rename": "Sent Pkts Dropped"},
+          {"name": "err_in", "rename": "Receive Errors"},
+          {"name": "err_out", "rename": "Transmit Errors"}
+        ]
+      },
+      "netstat": {
+        "measurement": [
+          "tcp_established",
+          "tcp_syn_sent",
+          "tcp_close"
+        ],
+        "metrics_collection_interval": 300
+      },
+      "processes": {
+        "measurement": [
+          "paging",
+          "blocked"
+        ]
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "${aws:InstanceId}"
+    },
+    "aggregation_dimensions" : [["AutoScalingGroupName"], ["InstanceId"],[]]
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "it-ubuntu-16.04",
+            "log_stream_name": "syslog",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+          },
+          {
+            "file_path": "/var/log/auth.log",
+            "log_group_name": "it-ubuntu-16.04",
+            "log_stream_name": "auth.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "it-ubuntu-16.04"
+  }
+}

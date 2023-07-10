@@ -1,0 +1,167 @@
+{
+  "variables": {
+    "platform":               "{{env `platform`}}",
+    "service_name":           "{{env `service_name`}}",
+    "service_version":        "{{env `service_version`}}",
+    "provision_version":      "{{env `provision_version`}}",
+    "os_flavor":              "{{env `os_flavor`}}",
+    "os_version":             "{{env `os_version`}}",
+    "docker_pull":            "{{env `docker_pull`}}",
+    "docker_image_in":        "{{env `docker_image_in`}}",
+    "docker_image_out":       "{{env `docker_image_out`}}",
+    "aws_profile":            "{{env `aws_profile`}}",
+    "aws_vpc_id":             "{{env `aws_vpc_id`}}",
+    "aws_subnet_id":          "{{env `aws_subnet_id`}}",
+    "aws_security_group_id":  "{{env `aws_security_group_id`}}",
+    "aws_ecr_host":           "{{env `aws_ecr_host`}}",
+    "root_ebs_encrypt":       "{{env `root_ebs_encrypt`}}",
+    "root_ebs_size":          "{{env `root_ebs_size`}}",
+    "root_ebs_type":          "{{env `root_ebs_type`}}"
+  },
+
+  "builders": [
+    {
+      "name":         "local",
+      "type":         "docker",
+      "image":        "{{ user `docker_image_in`}}",
+      "privileged":   true,
+      "commit":       false,
+      "pull":         "{{ user `docker_pull`}}",
+      "export_path":  ".cache/{{user `platform`}}-{{user `service_name`}}.local.tar"
+    },
+
+    {
+      "name":         "dev",
+      "type":         "docker",
+      "image":        "{{ user `docker_image_in`}}",
+      "privileged":   true,
+      "commit":       true
+    },
+
+    {
+      "name":               "prod",
+      "type":               "amazon-ebs",
+      "profile":            "{{user `aws_profile`}}",
+      "instance_type":      "t2.micro",
+      "ami_name":           "{{user `platform`}}-{{user `service_name`}}-{{user `service_version`}}-{{timestamp}}--packer_provisioned",
+      "vpc_id":             "{{user `aws_vpc_id`}}",
+      "subnet_id":          "{{user `aws_subnet_id`}}",
+      "security_group_id":  "{{user `aws_security_group_id`}}",
+      "ssh_username":       "ubuntu",
+      "ssh_interface":      "public_ip",
+      "associate_public_ip_address": "true",
+      "encrypt_boot":       "{{user `root_ebs_encrypt`}}",
+
+      "ami_block_device_mappings": [
+        {
+          "device_name": "/dev/sda1",
+          "volume_size": "{{user `root_ebs_size`}}",
+          "volume_type": "{{user `root_ebs_type`}}",
+          "delete_on_termination": true
+        }
+      ],
+
+      "launch_block_device_mappings": [
+        {
+          "device_name": "/dev/sda1",
+          "volume_size": "{{user `root_ebs_size`}}",
+          "volume_type": "{{user `root_ebs_type`}}",
+          "delete_on_termination": true
+        }
+      ],
+
+      "tags": {
+        "Name": "{{user `platform`}}-{{user `service_name`}}-{{timestamp}}",
+        "os"  : "{{user `os_flavor`}}:{{user `os_version`}}",
+        "version": "{{user `service_version`}}"
+      },
+
+      "source_ami_filter" : {
+        "filters": {
+          "architecture":         "x86_64",
+          "is-public":            "true",
+          "name":                 "ubuntu/images/hvm*/ubuntu-*{{user `os_version`}}*",
+          "root-device-type":     "ebs",
+          "state":                "available",
+          "virtualization-type":  "hvm"
+        },
+        "owners":         ["099720109477"],
+        "most_recent":    true
+      }
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type":         "file",
+      "source":       "service/{{user `service_name`}}/v{{user `provision_version`}}/upload",
+      "destination":  "/tmp/upload"
+    },
+
+    {
+      "type":         "file",
+      "source":       "library/os/{{user `os_flavor`}}",
+      "destination":  "/tmp/{{user `os_flavor`}}"
+    },
+
+    {
+      "only": ["local", "dev"],
+      "type": "shell",
+      "inline": ["df -h", "apt-get update", "apt-get install -y sudo"]
+    },
+
+    {
+      "type": "shell",
+      "execute_command": "echo '' | {{.Vars}} sudo -S -E bash '{{.Path}}'",
+      "environment_vars": [
+        "PLATFORM={{user `platform`}}",
+        "PROJECT={{user `service_name`}}",
+        "ENVIRONMENT=build",
+        "DEBIAN_FRONTEND=noninteractive"
+      ],
+      "scripts": [
+        "library/os/{{user `os_flavor`}}/common/apt.sh",
+        "library/os/{{user `os_flavor`}}/common/tools.sh",
+        "library/os/{{user `os_flavor`}}/common/logrotate.sh",
+        "service/{{user `service_name`}}/v{{user `provision_version`}}/provision.sh"
+      ]
+    },
+    {
+      "only": ["local", "dev"],
+      "type": "shell",
+      "script": "library/os/{{user `os_flavor`}}/common/docker-cleanup.sh"
+    },
+    {
+      "only": ["prod"],
+      "type": "shell",
+      "script": "library/os/{{user `os_flavor`}}/common/ami-cleanup.sh"
+    }
+  ],
+
+  "post-processors": [
+    [
+      {
+        "only":       ["local"],
+        "type":       "docker-import",
+        "repository": "{{user `docker_image_out`}}",
+        "tag":        "{{user `service_version`}}-{{user `provision_version`}}"
+      }
+    ],
+    [
+      {
+        "only":       ["dev"],
+        "type":       "docker-tag",
+        "repository": "{{user `aws_ecr_host`}}/{{user `platform`}}-{{user `service_name`}}-dev",
+        "tag":        "{{user `service_version`}}"
+      },
+
+      {
+        "only":         ["dev"],
+        "type":         "docker-push",
+        "ecr_login":    true,
+        "login_server": "https://{{user `aws_ecr_host`}}"
+      }
+    ]
+
+  ]
+}

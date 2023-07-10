@@ -1,0 +1,188 @@
+write_files:
+
+  # This is the configuration for what goes into the cloud watch logs,
+  # variables are dynamically populated during the terraform apply, all tags defined are exposed
+  # modify this to suite the needs of the application running.
+  # This configuration must be used to modify the default provied in the AMI;
+  # /sbin/configure_cloudwatch_agent is used to parse and include this configuration file.
+  - path: /etc/cloudwatch_log_files.json
+    permissions: '0600'
+    content: |
+      [
+        {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "syslog",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/auth.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "auth.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/cloud-init-output.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "cloud-init-output.log",
+            "timestamp_format": "%b %d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/php5.6-fpm.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "php5.6-fpm.log",
+            "timestamp_format": "%d-%b-%Y %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/aws/codedeploy-agent/codedeploy-agent.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "codedeploy-agent.log",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/mnt/log/deploy/s3.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "codedeploy-s3",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/www/example/app/logs/*.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "app-logs-merged",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        },
+        {
+            "file_path": "/var/log/apache2/example.access.log",
+            "log_group_name": "${Platform}/${Environment}-${Project}",
+            "log_stream_name": "example.access.log",
+            "timestamp_format": "%Y-%m-%d %H:%M:%S",
+            "timezone": "Local"
+        }
+      ]
+
+  # Override defaults for http php.
+  - path: /etc/php/5.6/fpm/conf.d/zz-app.php.ini
+    permission: '0700'
+    content: |
+      date.timezone           = UTC
+      max_execution_time      = 30s
+      max_input_time          = 60s
+      memory_limit            = 128M
+      post_max_size           = 8M
+      upload_max_filesize     = 2M
+
+  # Override defaults for cli php.
+  - path: /etc/php/5.6/cli/conf.d/zz-app.php.ini
+    permission: '0700'
+    content: |
+      date.timezone           = UTC
+
+  - path: /etc/apache2/sites-available/app.conf
+    permission: '0700'
+    content: |
+
+      <VirtualHost *:80>
+          DocumentRoot "/var/www/example/www"
+          CustomLog /var/log/apache2/example.access.log combined
+
+          ServerName localhost
+          ServerAlias *.example.com
+
+          ErrorDocument 404 /error.html
+          ErrorLog "syslog:local1"
+          SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+          DirectoryIndex app.php index.php
+
+          <Directory /var/www/example/www>
+              Options FollowSymLinks
+              AllowOverride FileInfo
+              AllowOverrideList ExpiresActive ExpiresByType DirectoryIndex
+              Order deny,allow
+              Allow from all
+              <LimitExcept GET POST HEAD>
+                  Require all denied
+              </LimitExcept>
+          </Directory>
+
+          <IfModule mod_headers.c>
+              Header always append X-XSS-Protection "1; mode=block"
+              Header always append X-Frame-Options "SAMEORIGIN"
+              Header always append X-Content-Type-Options "nosniff"
+              Header always append Strict-Transport-Security "max-age=31536000; includeSubDomains"
+              Header always append Content-Security-Policy-Report-Only "default-src 'self' data: ws: wss: *.example.com *.google-analytics.com *.segment.io *.cloudfront.net *.gstatic.com *.newrelic.com *.cloudflare.com *.twilio.com *.googleapis.com *.google.com *.nr-data.net *.bootstrapcdn.com 'unsafe-inline' 'unsafe-eval'"
+              #Header always append Content-Security-Policy "default-src 'self' data: ws: wss: *.example.com *.google-analytics.com *.segment.io *.cloudfront.net *.gstatic.com *.newrelic.com *.cloudflare.com *.twilio.com *.googleapis.com *.google.com *.nr-data.net *.bootstrapcdn.com 'unsafe-inline' 'unsafe-eval'"
+          </IfModule>
+
+          # CIS:5.9
+          RewriteEngine On
+          RewriteOptions Inherit
+
+          # white list allowed files. CIS:5.11
+          # list based on: `find . -type f -name '*.*' | sed 's|.*\.||' | sort -u`
+          <FilesMatch "^.*\.(css|html?|js|pdf|txt|xml|xsl|gif|json|svg|ico|swf|jpe?g|png|php|map|otf|scss|ttf|woff|woff2)$">
+              Require all granted
+          </FilesMatch>
+
+          <Location "/">
+             Require all granted
+          </Location>
+
+      </VirtualHost>
+
+  - path: /sbin/configure_cloudwatch_agent
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a stop | true
+      sudo cp /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json /tmp/cloudwatch-dist.json
+
+      jq --slurpfile conf /etc/cloudwatch_log_files.json '.logs.logs_collected.files.collect_list = $conf[0]' /tmp/cloudwatch-dist.json > /tmp/cloudwatch-logs-added.json
+      jq ".metrics.namespace = \"${Platform}/${Environment}-${Project}\" | .logs.log_stream_name = \"${Platform}-${Environment}-${Project}\" | .logs.logs_collected.files.collect_list[].log_group_name = \"${Platform}-${Environment}-${Project}\"" /tmp/cloudwatch-logs-added.json > /tmp/cloudwatch-namespace-added.json
+      sudo cp /tmp/cloudwatch-namespace-added.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json
+
+      # Start the agent up with new config
+      sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.compiled.json -s
+
+  - path: /sbin/configure_apache
+    permissions: '0700'
+    content: |
+      #!/bin/bash
+      a2enmod authz_host
+      a2ensite app
+      service restart php5.6-fpm
+      service restart apache2
+
+      find /var/www -type d -exec chmod 750 {} \;
+      find /var/www -type f -exec chmod 640 {} \;
+      chown -R www-data:www-data /var/www /srv/
+
+users:
+users:
+  - default
+  - name: ops-user
+    gecos: Ops User
+    groups: sudo
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    ssh-authorized-keys:
+      - "ssh-rsa ahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahahaahhahahahahahahahahahahahaha"
+  - name: deploy
+    gecos: Deploy User
+    groups: www-data, admin
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    shell: /bin/bash
+    lock-passwd: false
+    passwd: $ahahahahaahahahahaahahahahaahahahahaahahahaha.
+
+#
+# Install code deploy last as it has dependencies that are installed from cloud init.
+#
+runcmd:
+  - /sbin/configure_cloudwatch_agent
+  - /sbin/configure_apache

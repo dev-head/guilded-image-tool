@@ -1,0 +1,135 @@
+{
+  "variables": {
+    "name":                   "{{env `name`}}",
+    "version":                "{{env `version`}}",
+    "provisioned_version":    "{{env `provisioned_version`}}",
+    "parent_image":           "{{env `parent_image`}}",
+    "distro":                 "{{env `distro`}}",
+    "org":                    "{{env `org`}}",
+    "provisioner":            "{{env `provisioner`}}",
+    "pull":                   "{{env `pull`}}",
+    "changes":                "{{env `changes`}}",
+    "provisioning_lib":       "/packer-provision-library",
+    "source_dir":             "{{env `source_dir`}}",
+    "provision_file_name":    "provision.sh",
+    "run_command_entrypoint": "/bin/bash",
+
+    "aws_access_key":        "{{env `AWS_ACCESS_KEY_ID`}}",
+    "aws_secret_key":        "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "aws_token":             "{{env `AWS_TOKEN`}}",
+    "aws_region":            "{{env `AWS_DEFAULT_REGION`}}",
+    "aws_profile":           "{{env `AWS_PROFILE`}}",
+    "aws_ecr_host":          "{{env `AWS_ECR_HOST`}}"
+  },
+
+  "builders": [
+    {
+      "name":         "local",
+      "type":         "docker",
+      "image":        "{{ user `parent_image`}}",
+      "privileged":   true,
+      "commit":       true,
+      "pull":         "{{ user `pull`}}",
+      "changes":      [
+        "LABEL name=\"{{ user `name`}}\"",
+        "LABEL parent_image=\"{{ user `parent_image`}}\"",
+        "LABEL version=\"{{user `version`}}\"",
+        "CMD [\"/entrypoint.sh\", \"supervisord\", \"--configuration\", \"/etc/supervisor/supervisord.conf\"]",
+        "ENV GOPATH=/go",
+        "ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH"
+      ],
+      "run_command":   ["-d", "-i", "-t", "{{.Image}}", "{{ user `run_command_entrypoint` }}"]
+    },
+    {
+      "name":           "ecr",
+      "type":           "docker",
+      "image":          "{{user `aws_ecr_host`}}/{{ user `parent_image`}}",
+      "privileged":     true,
+      "commit":         true,
+      "pull":           true,
+      "ecr_login":      true,
+      "aws_access_key": "{{user `aws_access_key`}}",
+      "aws_secret_key": "{{user `aws_secret_key`}}",
+      "aws_token":      "{{user `aws_token`}}",
+      "aws_profile":    "{{user `aws_profile`}}",
+      "login_server":   "https://{{user `aws_ecr_host`}}",
+      "changes":      [
+        "LABEL name=\"{{ user `name` }}\"",
+        "LABEL parent_image=\"{{user `aws_ecr_host`}}/{{ user `parent_image`}}\"",
+        "LABEL version=\"{{user `version`}}\"",
+        "CMD [\"/entrypoint.sh\", \"supervisord\", \"--configuration\", \"/etc/supervisor/supervisord.conf\"]",
+        "ENV GOPATH=/go",
+        "ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH"
+      ],
+      "run_command":   ["-d", "-i", "-t", "{{.Image}}", "{{ user `run_command_entrypoint` }}"]
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type":         "file",
+      "source":       "library/os/{{user `distro`}}",
+      "destination":  "{{user `provisioning_lib`}}"
+    },
+    {
+      "type":         "file",
+      "source":       "{{ user `source_dir` }}/root",
+      "destination":  "{{user `provisioning_lib`}}"
+    },
+    {
+      "type": "shell",
+      "scripts": "{{ user `source_dir` }}/{{ user `provision_file_name` }}",
+      "environment_vars": ["PROVISIONING_LIB={{user `provisioning_lib`}}"]
+    },
+    {
+      "type": "shell",
+      "inline": ["rm -Rf {{user `provisioning_lib`}}"]
+    }
+  ],
+
+  "post-processors": [
+    [
+      {
+        "only": ["local"],
+        "type": "docker-tag",
+        "repository": "{{ user `name` }}",
+        "tag": "{{user `version`}}",
+        "keep_input_artifact": true
+      }
+    ],
+    [
+      {
+        "only": ["ecr"],
+        "type": "docker-tag",
+        "repository": "{{user `aws_ecr_host`}}/{{ user `name` }}",
+        "tag": "pv{{user `provisioned_version`}}-{{user `version`}}",
+        "keep_input_artifact": true
+      },
+      {
+        "only": ["ecr"],
+          "type":                 "docker-push",
+          "ecr_login":            true,
+          "aws_profile":          "{{user `aws_profile`}}",
+          "login_server":         "https://{{user `aws_ecr_host`}}",
+          "keep_input_artifact":  true
+      }
+    ],
+    [
+      {
+        "only": ["ecr"],
+        "type": "docker-tag",
+        "repository": "{{user `aws_ecr_host`}}/{{ user `name` }}",
+        "tag": "{{user `version`}}",
+        "keep_input_artifact": true
+      },
+      {
+        "only": ["ecr"],
+          "type":                 "docker-push",
+          "ecr_login":            true,
+          "aws_profile":          "{{user `aws_profile`}}",
+          "login_server":         "https://{{user `aws_ecr_host`}}",
+          "keep_input_artifact":  true
+      }
+    ]
+  ]
+}

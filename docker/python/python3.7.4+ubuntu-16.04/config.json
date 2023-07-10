@@ -1,0 +1,12 @@
+{
+  "name":                 "examplecom-python3.7.4",
+  "parent_image":         "examplecom-base_app:ubuntu-16.04",
+  "version":              "ubuntu-16.04",
+  "distro":               "ubuntu",
+  "org":                  "examplecom",
+  "pull":                 "false",
+  "provisioner":          "provision.sh",
+  "source_dir":           "docker/python/python3.7.4+ubuntu-16.04",
+  "provisioned_version":  "0.0.1",
+  "changes": "LABEL name=\"examplecom-python3.7.4\",LABEL parent_image=\"exco/base_app:ubuntu-16.04\",LABEL distro=\"ubuntu\""
+}

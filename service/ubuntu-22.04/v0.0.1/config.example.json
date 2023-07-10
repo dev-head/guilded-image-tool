@@ -1,0 +1,21 @@
+{
+  "platform":               "it",
+  "service_name":           "ubuntu-22.04",
+  "service_version":        "22.04",
+  "provision_version":      "0.0.1",
+  "os_flavor":              "ubuntu",
+  "os_version":             "22.04",
+
+  "docker_pull":            "true",
+  "docker_image_in":        "ubuntu:22.04",
+  "docker_image_out":       "exco/ubuntu",
+
+  "aws_vpc_id":             "vpc-55555555",
+  "aws_subnet_id":          "subnet-55555555",
+  "aws_security_group_id":  "sg-55555555",
+  "aws_ecr_host":           "555555555555.dkr.ecr.us-east-1.amazonaws.com",
+
+  "root_ebs_encrypt":       "true",
+  "root_ebs_size":          "20",
+  "root_ebs_type":          "gp2"
+}

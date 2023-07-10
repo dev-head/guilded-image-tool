@@ -1,0 +1,108 @@
+{
+  "variables": {
+    "name":                   "{{env `name`}}",
+    "version":                "{{env `version`}}",
+    "provisioned_version":    "{{env `provisioned_version`}}",
+    "parent_image":           "{{env `parent_image`}}",
+    "distro":                 "{{env `distro`}}",
+    "org":                    "{{env `org`}}",
+    "provisioner":            "{{env `provisioner`}}",
+    "pull":                   "{{env `pull`}}",
+    "changes":                "{{env `changes`}}",
+    "provisioning_lib":       "/packer-provision-library",
+    "source_dir":             "{{env `source_dir`}}",
+    "provision_file_name":    "provision.sh",
+    "run_command_entrypoint": "/bin/bash",
+
+    "aws_access_key":        "{{env `AWS_ACCESS_KEY_ID`}}",
+    "aws_secret_key":        "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "aws_token":             "{{env `AWS_TOKEN`}}",
+    "aws_region":            "{{env `AWS_DEFAULT_REGION`}}",
+    "aws_profile":           "{{env `AWS_PROFILE`}}"
+  },
+
+  "builders": [
+    {
+      "name":         "ecr",
+      "type":         "docker",
+      "image":        "{{ user `parent_image`}}",
+      "privileged":   true,
+      "commit":       true,
+      "pull":         "{{ user `pull`}}",
+      "changes":      [
+        "LABEL name=\"bootstrap\"",
+        "LABEL parent_image=\"ubuntu:16.04\"",
+        "LABEL version=\"ubuntu-16.04\"",
+        "LABEL distro=\"ubuntu\"",
+        "LABEL org=\"example\"",
+        "LABEL maintainer=\"dev-head\"",
+        "LABEL description=\"Boostrapped image.\"",
+        "LABEL provisioner=\"packer\"",
+        "WORKDIR /",
+        "ENTRYPOINT [\"/tini\", \"--\"]",
+        "CMD [\"/bin/bash\"]"
+      ],
+      "run_command":   ["-d", "-i", "-t", "{{.Image}}", "{{ user `run_command_entrypoint` }}"]
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type":         "file",
+      "source":       "library/os/{{user `distro`}}",
+      "destination":  "{{user `provisioning_lib`}}"
+    },
+    {
+      "type":         "file",
+      "source":       "{{ user `source_dir` }}/root",
+      "destination":  "{{user `provisioning_lib`}}"
+    },
+    {
+      "type": "shell",
+      "scripts": "{{ user `source_dir` }}/{{ user `provision_file_name` }}",
+      "environment_vars": ["PROVISIONING_LIB={{user `provisioning_lib`}}"]
+    },
+    {
+      "type": "shell",
+      "inline": ["rm -Rf {{user `provisioning_lib`}}"]
+    }
+  ],
+
+  "post-processors": [
+    [
+      {
+        "type": "docker-tag",
+        "repository": "{{ user `org` }}/{{ user `name` }}",
+        "tag": "{{user `version`}}"
+      }
+    ],
+    [
+      {
+        "type": "docker-tag",
+        "repository": "{{user `aws_ecr_host`}}/{{ user `org` }}-{{ user `name` }}",
+        "tag": "pv{{user `provisioned_version`}}-{{user `version`}}"
+      },
+      {
+          "type":                 "docker-push",
+          "ecr_login":            true,
+          "aws_profile":          "{{user `aws_profile`}}",
+          "login_server":         "https://{{user `aws_ecr_host`}}",
+          "keep_input_artifact":  false
+      }
+    ],
+    [
+      {
+        "type": "docker-tag",
+        "repository": "{{user `aws_ecr_host`}}/{{ user `org` }}-{{ user `name` }}",
+        "tag": "{{user `version`}}"
+      },
+      {
+          "type":                 "docker-push",
+          "ecr_login":            true,
+          "aws_profile":          "{{user `aws_profile`}}",
+          "login_server":         "https://{{user `aws_ecr_host`}}",
+          "keep_input_artifact":  false
+      }
+    ]
+  ]
+}
